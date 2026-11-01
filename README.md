@@ -6,6 +6,13 @@
 
 ## Building and Running
 
+This project uses Halide as a submodule.
+Make sure these are initialized, e.g.
+
+```
+git submodule update --init
+```
+
 We use `cmake` as the build system.
 To compile the program, run:
 

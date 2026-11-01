@@ -1,4 +1,7 @@
 #include "sandpile.h"
+#include <Halide.h>
+#include <cstdint>
+#include <unistd.h>
 
 Grid::Grid(int N) : N(N), data(N * N) {}
 
@@ -8,44 +11,74 @@ const Grid::count &Grid::operator[](int row, int col) const {
 }
 
 void Grid::stabilize() {
-  int changed = 0;
+  Halide::Var x("x"), y("y");
+  Halide::Func unstable("unstable"), pull("pull"), histogram("histogram");
+
+  Halide::Buffer<count> grid(data.data(), N, N);
+  Halide::Func clamped = Halide::BoundaryConditions::constant_exterior(grid, 0);
+
+  // pacman shape consists of two parts:
+  //     circle at (N/2, N/2) with radius N/2
+  //     everything besides a triangle, j <= max(i, N - 1 - i)
+  Halide::RDom r(0, N, 0, N);
+  const int N2 = N / 2;
+  r.where((r.x - N2) * (r.x - N2) + (r.y - N2) * (r.y - N2) <= N2 * N2);
+  r.where(r.x <= Halide::max(r.y, N - 1 - r.y));
+
+  // check if a given cell is stable or not
+  unstable(x, y) = clamped(x, y) >= 4;
+  // unstable.compute_root();
+
+  // count the numbe of stable cells (pos 0) or unstable (pos 1)
+  histogram(unstable(r.x, r.y)) += 1;
+
+  // incr the value of the cell by the number of unstable nbrs
+  pull(x, y) = count(0);
+  pull(r.x, r.y) = clamped(r.x, r.y) +
+                   Halide::cast<count>(unstable(r.x - 1, r.y)) +
+                   Halide::cast<count>(unstable(r.x + 1, r.y)) +
+                   Halide::cast<count>(unstable(r.x, r.y - 1)) +
+                   Halide::cast<count>(unstable(r.x, r.y + 1)) -
+                   4 * Halide::cast<count>(unstable(r.x, r.y));
+
+  Halide::Buffer<int> counts;
   do {
-    changed = 0;
-    for (int i = 0; i < N; ++i) {
-      for (int j = 0; j <= std::max(i, N - 1 - i); ++j) {
-        if ((i - N / 2) * (i - N / 2) + (j - N / 2) * (j - N / 2) <=
-            (N / 2) * (N / 2)) {
-          if ((*this)[i, j] < 4)
-            continue;
-          changed = 1; // topple it
-          (*this)[i, j] -= 4;
-          if (i > 0)
-            (*this)[i - 1, j]++;
-          if (j > 0)
-            (*this)[i, j - 1]++;
-          if (i < N - 1)
-            (*this)[i + 1, j]++;
-          if (j < N - 1)
-            (*this)[i, j + 1]++;
-        }
-      }
-    }
-  } while (changed);
+    Halide::Buffer<count> buf = pull.realize({N, N});
+    for (int i = 0; i < N; ++i)
+      for (int j = 0; j < N; ++j)
+        (*this)[i, j] = buf(j, i);
+
+    // for (int i = 0; i < N; ++i) {
+    //   for (int j = 0; j < N; ++j)
+    //     printf("%d", grid(j, i));
+    //   printf("\n");
+    // }
+    // printf("\n");
+
+    counts = histogram.realize({2});
+  } while (counts(1) > 0);
 }
 
 Grid Grid::find_identity(int N) {
+  std::set_terminate(Halide::Internal::unhandled_exception_handler);
+
   Grid grid(N);
 
   // T(6)
   for (int i = 0; i < N; ++i)
-    for (int j = 0; j < N; ++j)
-      grid[i, j] = 6;
+    for (int j = 0; j <= std::max(i, N - 1 - i); ++j)
+      if ((i - N / 2) * (i - N / 2) + (j - N / 2) * (j - N / 2) <=
+          (N / 2) * (N / 2))
+        grid[i, j] = 6;
+
   grid.stabilize();
 
   // T(6 - T(6))
   for (int i = 0; i < N; ++i)
-    for (int j = 0; j < N; ++j)
-      grid[i, j] = 6 - grid[i, j];
+    for (int j = 0; j <= std::max(i, N - 1 - i); ++j)
+      if ((i - N / 2) * (i - N / 2) + (j - N / 2) * (j - N / 2) <=
+          (N / 2) * (N / 2))
+        grid[i, j] = 6 - grid[i, j];
   grid.stabilize();
 
   return grid;

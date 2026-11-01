@@ -9,6 +9,7 @@ set(SOURCES src/main.cpp src/sandpile.cpp)
 set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
 project(sandpile)
+add_subdirectory(halide)
 add_executable(sandpile ${SOURCES})
 target_include_directories(sandpile PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
+target_link_libraries(sandpile PRIVATE Halide::Halide Halide::Tools Halide::ImageIO)
