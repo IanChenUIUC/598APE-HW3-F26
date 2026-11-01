@@ -32,7 +32,8 @@ void Grid::stabilize() {
   histogram(unstable(r.x, r.y)) += 1;
 
   // incr the value of the cell by the number of unstable nbrs
-  pull(x, y) = count(0); // undef<count> more expensive, as copy needs to check
+  // note: undef<count> more expensive, as copy needs to check
+  pull(x, y) = Halide::cast<count>(0);
   pull(r.x, r.y) = clamped(r.x, r.y) -
                    4 * Halide::cast<count>(unstable(r.x, r.y)) +
                    Halide::cast<count>(unstable(r.x - 1, r.y)) +

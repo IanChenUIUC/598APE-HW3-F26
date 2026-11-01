@@ -6,7 +6,7 @@ class Grid {
 public:
   int N;
 
-  using count = int;
+  using count = int8_t;
   Grid(int N);
 
   // 2-D array indexing
