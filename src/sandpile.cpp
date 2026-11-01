@@ -27,19 +27,30 @@ void Grid::stabilize() {
 
   // check if a given cell is stable or not
   unstable(x, y) = clamped(x, y) >= 4;
-  // unstable.compute_root();
 
   // count the numbe of stable cells (pos 0) or unstable (pos 1)
   histogram(unstable(r.x, r.y)) += 1;
 
   // incr the value of the cell by the number of unstable nbrs
-  pull(x, y) = count(0);
-  pull(r.x, r.y) = clamped(r.x, r.y) +
+  pull(x, y) = count(0); // undef<count> more expensive, as copy needs to check
+  pull(r.x, r.y) = clamped(r.x, r.y) -
+                   4 * Halide::cast<count>(unstable(r.x, r.y)) +
                    Halide::cast<count>(unstable(r.x - 1, r.y)) +
                    Halide::cast<count>(unstable(r.x + 1, r.y)) +
                    Halide::cast<count>(unstable(r.x, r.y - 1)) +
-                   Halide::cast<count>(unstable(r.x, r.y + 1)) -
-                   4 * Halide::cast<count>(unstable(r.x, r.y));
+                   Halide::cast<count>(unstable(r.x, r.y + 1));
+
+  // tiling didn't do anything
+  //    Halide::RVar x_outer, x_inner, y_outer, y_inner;
+  //    pull.update(0).tile(r.x, r.y, x_outer, y_outer, x_inner, y_inner, 64,
+  //    64);
+
+  // vectorization didn't seem to work
+  //    pull.update(0).vectorize(r.x, 4);
+
+  // parallel doesn't help as it increases the cost per round
+  // and there are many short rounds...
+  //    pull.update(0).parallel(r.x);
 
   Halide::Buffer<int> counts;
   do {
@@ -47,13 +58,6 @@ void Grid::stabilize() {
     for (int i = 0; i < N; ++i)
       for (int j = 0; j < N; ++j)
         (*this)[i, j] = buf(j, i);
-
-    // for (int i = 0; i < N; ++i) {
-    //   for (int j = 0; j < N; ++j)
-    //     printf("%d", grid(j, i));
-    //   printf("\n");
-    // }
-    // printf("\n");
 
     counts = histogram.realize({2});
   } while (counts(1) > 0);
