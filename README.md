@@ -11,35 +11,24 @@ abelian sandpile.
 
 *Identity sandpile on a 1001x1001 pacman grid*
 
-
+We use `cmake` as the build system.
 To compile the program, run:
 
 ```bash
-make all
+cmake -S . -B build && cmake --build build
 ```
 
 To clean existing build artifacts, run:
 
 ```bash
-make clean
+rm -rf build
 ```
 
 Usage (after compiling):
 
 ```bash
-./sandpile.exe <N> 
+./build/sandpile -n <N> [-r]
 ```
 
-where `N` is the grid size
-
-Consider speeding up the generation of this 1001x1001 identity sandpile (which
-takes approximately ~3m 40s on my local laptop under the default setup)
-
-```bash
-./sandpile.exe 1001
-```
-
-For an optional, ungraded challenge, see how large a sandpile you can compute
-on the course VMs and report the grid size and runtime. There is no prescribed
-upper limit on `N` for this challenge.
-
+where `N` is the grid size.
+Add the `-r` flag it it should be rendered.

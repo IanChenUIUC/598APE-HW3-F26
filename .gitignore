@@ -1,3 +1,5 @@
+.cache
+
 # LaTeX build artifacts
 *.aux
 *.bbl
@@ -18,3 +20,7 @@
 
 # Compiled handouts
 /handout/*.pdf
+
+identity.png
+build
+compile_commands.json
