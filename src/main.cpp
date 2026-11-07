@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <getopt.h>
+#include <omp.h>
 
 #include "sandpile.h"
 
@@ -39,6 +40,8 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Usage: %s -n N [-r]\n", argv[0]);
     return EXIT_FAILURE;
   }
+
+  printf("running with %d threads\n", omp_get_max_threads());
 
   if (N & 1)
     return solve<true>(N, dorender);

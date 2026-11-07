@@ -11,3 +11,6 @@ set(CMAKE_BUILD_TYPE RelWithDebInfo)
 project(sandpile)
 add_executable(sandpile ${SOURCES})
 target_include_directories(sandpile PRIVATE ${PROJECT_SOURCE_DIR}/include)
+
+find_package(OpenMP COMPONENTS CXX REQUIRED)
+target_link_libraries(sandpile PRIVATE OpenMP::OpenMP_CXX)

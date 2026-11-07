@@ -1,4 +1,5 @@
 #include <cmath>
+#include <omp.h>
 
 #include "sandpile.h"
 
@@ -53,6 +54,7 @@ template <bool Odd> void Grid<Odd>::stabilize() {
   bool c;
   do {
     c = false;
+#pragma omp parallel for reduction(| : c) schedule(guided)
     for (int i = 0; i < R; ++i)
       c |= gather(N, i, &(*this)[i - 1], &(*this)[i], &(*this)[i + 1], &buf[i]);
     std::swap(buf.data, this->data);
