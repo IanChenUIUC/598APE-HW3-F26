@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include "sandpile.h"
 
 template <> Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data(N * R) {}
@@ -17,28 +19,39 @@ const Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) const {
   return data[row * N + col];
 }
 
+int get_lo(int N, int row) {
+  int N2 = N / 2;
+  return N2 - (int)(std::sqrt(N2 * N2 - (row - N2) * (row - N2)));
+}
+
+int get_hi(int N, int row) {
+  int N2 = N / 2;
+  int thresh1 = std::max(row, N - 1 - row);
+  int thresh2 = N2 + (int)(std::sqrt(N2 * N2 - (row - N2) * (row - N2)));
+  return std::min(thresh1, thresh2) + 1;
+}
+
 template <bool Odd> void Grid<Odd>::stabilize() {
   int changed = 0;
   do {
     changed = 0;
     for (int i = 0; i < R; ++i) {
-      for (int j = 0; j <= std::max(i, N - 1 - i); ++j) {
-        if ((i - N / 2) * (i - N / 2) + (j - N / 2) * (j - N / 2) <=
-            (N / 2) * (N / 2)) {
-          if ((*this)[i, j] < 4)
-            continue;
-          changed = 1; // topple it
-          (*this)[i, j] -= 4;
-          if (i > 0)
-            (*this)[i - 1, j]++;
-          if (j > 0)
-            (*this)[i, j - 1]++;
-          // folded rows: row R-2 stands for two rows next to the middle row
-          if (i < N - 1 && !(Odd && i == R - 1))
-            (*this)[i + 1, j] += (Odd && i == R - 2) ? 2 : 1;
-          if (j < N - 1)
-            (*this)[i, j + 1]++;
-        }
+      int lo = get_lo(N, i);
+      int hi = get_hi(N, i);
+      for (int j = lo; j < hi; ++j) {
+        if ((*this)[i, j] < 4)
+          continue;
+        changed = 1; // topple it
+        (*this)[i, j] -= 4;
+        if (i > 0)
+          (*this)[i - 1, j]++;
+        if (j > 0)
+          (*this)[i, j - 1]++;
+        // folded rows: row R-2 stands for two rows next to the middle row
+        if (i < N - 1 && !(Odd && i == R - 1))
+          (*this)[i + 1, j] += (Odd && i == R - 2) ? 2 : 1;
+        if (j < N - 1)
+          (*this)[i, j + 1]++;
       }
     }
   } while (changed);
@@ -49,13 +62,13 @@ template <bool Odd> Grid<Odd> Grid<Odd>::find_identity(int N) {
 
   // T(6)
   for (int i = 0; i < grid.R; ++i)
-    for (int j = 0; j < N; ++j)
+    for (int j = get_lo(N, i); j < get_hi(N, i); ++j)
       grid[i, j] = 6;
   grid.stabilize();
 
   // T(6 - T(6))
   for (int i = 0; i < grid.R; ++i)
-    for (int j = 0; j < N; ++j)
+    for (int j = get_lo(N, i); j < get_hi(N, i); ++j)
       grid[i, j] = 6 - grid[i, j];
   grid.stabilize();
 
