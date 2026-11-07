@@ -2,21 +2,23 @@
 
 #include "sandpile.h"
 
-template <> Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data(N * R) {}
-template <> Grid<false>::Grid(int N) : N(N), R(N), data(N * R) {}
+template <>
+Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data((N + 2) * (R + 1)) {}
+
+template <> Grid<false>::Grid(int N) : N(N), R(N), data((N + 2) * (R + 2)) {}
 
 // if Odd, then Grid can store symmetric
 template <bool Odd> Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) {
-  if (row >= R)
+  if (Odd && row >= R)
     row = N - 1 - row;
-  return data[row * N + col];
+  return data[(row + 1) * (N + 2) + (col + 1)];
 }
 
 template <bool Odd>
 const Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) const {
-  if (row >= R)
+  if (Odd && row >= R)
     row = N - 1 - row;
-  return data[row * N + col];
+  return data[(row + 1) * (N + 2) + (col + 1)];
 }
 
 int get_lo(int N, int row) {
@@ -43,15 +45,12 @@ template <bool Odd> void Grid<Odd>::stabilize() {
           continue;
         changed = 1; // topple it
         (*this)[i, j] -= 4;
-        if (i > 0)
-          (*this)[i - 1, j]++;
-        if (j > 0)
-          (*this)[i, j - 1]++;
+        (*this)[i - 1, j]++;
+        (*this)[i, j - 1]++;
         // folded rows: row R-2 stands for two rows next to the middle row
-        if (i < N - 1 && !(Odd && i == R - 1))
+        if (!(Odd && i == R - 1))
           (*this)[i + 1, j] += (Odd && i == R - 2) ? 2 : 1;
-        if (j < N - 1)
-          (*this)[i, j + 1]++;
+        (*this)[i, j + 1]++;
       }
     }
   } while (changed);
