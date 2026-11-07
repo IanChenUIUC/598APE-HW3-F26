@@ -33,27 +33,30 @@ int get_hi(int N, int row) {
   return std::min(thresh1, thresh2) + 1;
 }
 
-template <bool Odd> void Grid<Odd>::stabilize() {
+template <bool Odd>
+int Grid<Odd>::gather(int N, int row, const count *__restrict prev,
+                      const count *__restrict cur, const count *__restrict next,
+                      count *__restrict out) {
+  int lo = get_lo(N, row);
+  int hi = get_hi(N, row);
   int changed = 0;
+  for (int j = lo; j < hi; ++j) {
+    out[j] = cur[j] - 4 * (cur[j] >= 4) + (prev[j] >= 4) + (cur[j - 1] >= 4) +
+             (next[j] >= 4) + (cur[j + 1] >= 4);
+    changed |= out[j] != cur[j];
+  }
+  return changed;
+}
+
+template <bool Odd> void Grid<Odd>::stabilize() {
+  Grid<Odd> buf(N);
+  bool c;
   do {
-    changed = 0;
-    for (int i = 0; i < R; ++i) {
-      int lo = get_lo(N, i);
-      int hi = get_hi(N, i);
-      for (int j = lo; j < hi; ++j) {
-        if ((*this)[i, j] < 4)
-          continue;
-        changed = 1; // topple it
-        (*this)[i, j] -= 4;
-        (*this)[i - 1, j]++;
-        (*this)[i, j - 1]++;
-        // folded rows: row R-2 stands for two rows next to the middle row
-        if (!(Odd && i == R - 1))
-          (*this)[i + 1, j] += (Odd && i == R - 2) ? 2 : 1;
-        (*this)[i, j + 1]++;
-      }
-    }
-  } while (changed);
+    c = false;
+    for (int i = 0; i < R; ++i)
+      c |= gather(N, i, &(*this)[i - 1], &(*this)[i], &(*this)[i + 1], &buf[i]);
+    std::swap(buf.data, this->data);
+  } while (c);
 }
 
 template <bool Odd> Grid<Odd> Grid<Odd>::find_identity(int N) {
