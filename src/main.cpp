@@ -1,6 +1,21 @@
+#include <cstdlib>
 #include <getopt.h>
 
 #include "sandpile.h"
+
+template <bool Odd> int solve(int N, bool dorender) {
+  Grid<Odd> grid = Grid<Odd>::find_identity(N);
+  if (dorender) {
+    std::string filename = "identity.png";
+    if (grid.render(filename)) {
+      printf("Successfully saved sandpile identity to: %s\n", filename.c_str());
+    } else {
+      printf("Error: stb_image_write failed to save png file\n");
+      return EXIT_FAILURE;
+    }
+  }
+  return EXIT_SUCCESS;
+}
 
 int main(int argc, char **argv) {
   bool dorender = false;
@@ -25,16 +40,7 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  Grid grid = Grid::find_identity(N);
-
-  if (dorender) {
-    std::string filename = "identity.png";
-    if (grid.render(filename)) {
-      printf("Successfully saved sandpile identity to: %s\n", filename.c_str());
-    } else {
-      printf("Error: stb_image_write failed to save png file\n");
-    }
-  }
-
-  return EXIT_SUCCESS;
+  if (N & 1)
+    return solve<true>(N, dorender);
+  return solve<false>(N, dorender);
 }

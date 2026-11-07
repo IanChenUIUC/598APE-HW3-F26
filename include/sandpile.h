@@ -2,11 +2,9 @@
 #include <string>
 #include <vector>
 
-class Grid {
+template <bool Odd> class Grid {
 public:
-  int N;
-
-  using count = int;
+  using count = int8_t;
   Grid(int N);
 
   // 2-D array indexing
@@ -20,6 +18,9 @@ public:
   static Grid find_identity(int N);
 
 private:
+  const int N;
+  const int R; // half if it is odd
+
   // stabilize
   void stabilize();
 

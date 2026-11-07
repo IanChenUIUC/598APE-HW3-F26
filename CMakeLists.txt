@@ -11,4 +11,3 @@ set(CMAKE_BUILD_TYPE RelWithDebInfo)
 project(sandpile)
 add_executable(sandpile ${SOURCES})
 target_include_directories(sandpile PRIVATE ${PROJECT_SOURCE_DIR}/include)
-

@@ -24,6 +24,7 @@ def main():
             print(f"Timed out at {size=} after {args.timeout} seconds")
             return
         size = int(size * (2**0.25))
+        size += ~(size & 1)  # ensure it is odd
 
 
 if __name__ == "__main__":
