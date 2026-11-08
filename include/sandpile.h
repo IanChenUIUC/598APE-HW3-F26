@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <string>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 // 2D array with {0}-padding of width 1;
@@ -17,6 +16,8 @@ public:
 
   const T &operator[](int row, int col) const { return data[offset(row, col)]; }
   T &operator[](int row, int col) { return data[offset(row, col)]; }
+
+  bool operator==(const PaddedMatrix &) const = default;
 
 private:
   int rows;
@@ -51,6 +52,10 @@ public:
   // find the identity element of the Pacman recurrent Abelian Sandpile Model;
   // if VerifyOutput, also keep its potential as a certificate
   static Grid identity_difference(int N);
+
+  // find the identity element of the Pacman recurrent Abelian Sandpile Model;
+  static Grid identity_burning(int N)
+    requires VerifyOutput::value;
 
   // whether the grid is the identity: recurrent, and zero by its potential
   bool verify_solution() const
@@ -107,7 +112,7 @@ private:
   Matrix<uint8_t> topples;
   void flush();
 
-  // bilinear interpolation, scaled by the squared ratio of sizes
+  // bilinear interpolation, scaled by the squared ratio of sizes, raised by N
   void interpolate(const Grid<true, std::true_type> &source);
 
   // set data = L potential

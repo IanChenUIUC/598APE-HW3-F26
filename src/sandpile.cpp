@@ -198,7 +198,9 @@ void Grid<Odd, VerifyOutput>::interpolate(
       double dy = y - y0;
       double v = (1 - dx) * ((1 - dy) * g[x0, y0] + dy * g[x0, y0 + 1]) +
                  dx * ((1 - dy) * g[x0 + 1, y0] + dy * g[x0 + 1, y0 + 1]);
-      potential[i, j] = std::lround(scale * v);
+      // raising by N adds N L 1, i.e. N rounds of burning in one stabilize;
+      // this exceeds how far the guess is below the identity (about N / 2)
+      potential[i, j] = std::lround(scale * v) + N;
     }
   }
 }
@@ -288,6 +290,32 @@ Grid<Odd, VerifyOutput> Grid<Odd, VerifyOutput>::identity_difference(int N) {
     }
   }
   grid.stabilize_tiled();
+
+  return grid;
+}
+
+template <bool Odd, typename VerifyOutput>
+Grid<Odd, VerifyOutput> Grid<Odd, VerifyOutput>::identity_burning(int N)
+  requires VerifyOutput::value
+{
+  constexpr int base = 61;
+  if (N <= base)
+    return identity_difference(N);
+
+  Grid grid(N, Grid<true, std::true_type>::identity_burning(((N - 1) / 2) | 1));
+  grid.stabilize_tiled();
+
+  // recurrent <-> adding L 1 leaves all grid cells unchanged
+  Matrix<count> before(grid.R, grid.N);
+  do {
+    before = grid.data;
+#pragma omp parallel for schedule(guided)
+    for (int i = 0; i < grid.R; ++i)
+      for (int j = grid.lo[i]; j < grid.hi[i]; ++j)
+        ++grid.potential[i, j];
+    grid.set_heights();
+    grid.stabilize_tiled();
+  } while (grid.data != before);
 
   return grid;
 }
