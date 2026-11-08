@@ -1,84 +1,119 @@
 #include <cmath>
+#include <limits>
 #include <omp.h>
+#include <stdexcept>
+#include <utility>
 
 #include "sandpile.h"
 
-template <> Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data(R, N) {
-  lo.reserve(R);
-  hi.reserve(R);
+// reflect x about n, assuming 0 <= x <= 2n
+int mirror(int x, int n) { return x <= n ? x : 2 * n - x; }
+
+template <bool Odd, typename VerifyOutput>
+Grid<Odd, VerifyOutput>::Grid(int N)
+    : N(N), R(Odd ? (N + 1) / 2 : N), data(R, N), potential(R, N),
+      topples(R, N) {
+  if (Odd != (N % 2 == 1))
+    throw std::invalid_argument("Grid: Odd must match the parity of N");
+
+  lo.reserve(N);
+  hi.reserve(N);
 
   int N2 = N / 2;
-  for (int i = 0; i < R; ++i) {
+  for (int i = 0; i < N; ++i) {
     int rad = static_cast<int>(std::sqrt(N2 * N2 - (i - N2) * (i - N2)));
     lo.push_back(N2 - rad);
     hi.push_back(std::min(std::max(i, N - 1 - i), N2 + rad) + 1);
   }
 }
 
-template <> Grid<false>::Grid(int N) : N(N), R(N), data(R, N) {
-  lo.reserve(R);
-  hi.reserve(R);
-
-  int N2 = N / 2;
-  for (int i = 0; i < R; ++i) {
-    int rad = static_cast<int>(std::sqrt(N2 * N2 - (i - N2) * (i - N2)));
-    lo.push_back(N2 - rad);
-    hi.push_back(std::min(std::max(i, N - 1 - i), N2 + rad) + 1);
-  }
+// if Odd, then Grid stores only the top half, as the grid is symmetric
+template <bool Odd, typename VerifyOutput>
+std::pair<int, int> Grid<Odd, VerifyOutput>::index(int row, int col) const {
+  return {Odd ? mirror(row, R - 1) : row, col};
 }
 
-// if Odd, then Grid can store symmetric
-template <bool Odd> Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) {
-  if (Odd && row >= R)
-    row = N - 1 - row;
-  return data[row, col];
+template <bool Odd, typename VerifyOutput>
+Grid<Odd, VerifyOutput>::count &Grid<Odd, VerifyOutput>::operator[](int row,
+                                                                    int col) {
+  auto [r, c] = index(row, col);
+  return data[r, c];
 }
 
-template <bool Odd>
-const Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) const {
-  if (Odd && row >= R)
-    row = N - 1 - row;
-  return data[row, col];
+template <bool Odd, typename VerifyOutput>
+const Grid<Odd, VerifyOutput>::count &
+Grid<Odd, VerifyOutput>::operator[](int row, int col) const {
+  auto [r, c] = index(row, col);
+  return data[r, c];
 }
 
-template <bool Odd>
-bool Grid<Odd>::gather(int lo, int hi, const count *__restrict prev,
-                       const count *__restrict cur,
-                       const count *__restrict next, count *__restrict out) {
+template <bool Odd, typename VerifyOutput>
+bool Grid<Odd, VerifyOutput>::gather(int lo, int hi,
+                                     const count *__restrict prev,
+                                     const count *__restrict cur,
+                                     const count *__restrict next,
+                                     count *__restrict out,
+                                     uint8_t *__restrict pot) {
   bool changed = 0;
   for (int j = lo; j < hi; ++j) {
     out[j] = cur[j] - 4 * (cur[j] >= 4) + (prev[j] >= 4) + (cur[j - 1] >= 4) +
              (next[j] >= 4) + (cur[j + 1] >= 4);
+    if constexpr (VerifyOutput::value)
+      pot[j] += cur[j] >= 4;
     changed |= out[j] != cur[j];
   }
   return changed;
 }
 
-template <bool Odd>
-bool Grid<Odd>::gather(Grid &out, int row_lo, int row_hi, int col_lo,
-                       int col_hi) const {
+template <bool Odd, typename VerifyOutput>
+bool Grid<Odd, VerifyOutput>::gather(PaddedMatrix<count> &out, int row_lo,
+                                     int row_hi, int col_lo, int col_hi) {
   bool changed = false;
   for (int i = row_lo; i < row_hi; ++i)
     changed |= gather(std::max(lo[i], col_lo), std::min(hi[i], col_hi),
-                      &(*this)[i - 1], &(*this)[i], &(*this)[i + 1], &out[i]);
+                      &(*this)[i - 1], &(*this)[i], &(*this)[i + 1], &out[i, 0],
+                      &topples[i, 0]);
   return changed;
 }
 
-template <bool Odd> void Grid<Odd>::stabilize() {
-  Grid<Odd> buf(N);
+template <bool Odd, typename VerifyOutput>
+void Grid<Odd, VerifyOutput>::stabilize() {
+  PaddedMatrix<count> buf(R, N);
+  int sweeps = 0;
   bool c;
   do {
     c = false;
 #pragma omp parallel for reduction(| : c) schedule(guided)
     for (int i = 0; i < R; ++i)
       c |= gather(buf, i, i + 1, 0, N);
-    std::swap(buf.data, this->data);
+    std::swap(buf, this->data);
+
+    // a cell topples at most once per sweep, so flush before the counts wrap
+    if constexpr (VerifyOutput::value) {
+      if (++sweeps == std::numeric_limits<uint8_t>::max()) {
+        flush();
+        sweeps = 0;
+      }
+    }
   } while (c);
+  if constexpr (VerifyOutput::value)
+    flush();
 }
 
-template <bool Odd>
+template <bool Odd, typename VerifyOutput>
+void Grid<Odd, VerifyOutput>::flush() {
+#pragma omp parallel for schedule(guided)
+  for (int i = 0; i < R; ++i) {
+    for (int j = lo[i]; j < hi[i]; ++j) {
+      potential[i, j] -= topples[i, j];
+      topples[i, j] = 0;
+    }
+  }
+}
+
+template <bool Odd, typename VerifyOutput>
 template <int TileW, int TileH>
-void Grid<Odd>::stabilize_tiled() {
+void Grid<Odd, VerifyOutput>::stabilize_tiled() {
   const int rows = (R + TileH - 1) / TileH;
   const int cols = (N + TileW - 1) / TileW;
 
@@ -89,7 +124,8 @@ void Grid<Odd>::stabilize_tiled() {
   };
   PaddedMatrix<Flag> prev(rows, cols, Flag{1}), cur(rows, cols);
 
-  Grid<Odd> buf(N);
+  PaddedMatrix<count> buf(R, N);
+  int sweeps = 0;
   bool c;
   do {
     c = false;
@@ -121,12 +157,80 @@ void Grid<Odd>::stabilize_tiled() {
         c |= changed;
       }
     }
-    std::swap(buf.data, this->data);
+    std::swap(buf, this->data);
     std::swap(prev, cur);
+
+    // a cell topples at most once per sweep, so flush before the counts wrap
+    if constexpr (VerifyOutput::value) {
+      if (++sweeps == std::numeric_limits<uint8_t>::max()) {
+        flush();
+        sweeps = 0;
+      }
+    }
   } while (c);
+  if constexpr (VerifyOutput::value)
+    flush();
 }
 
-template <bool Odd> Grid<Odd> Grid<Odd>::find_identity(int N) {
+// Dhar's burning test for recurrence
+template <bool Odd, typename VerifyOutput>
+bool Grid<Odd, VerifyOutput>::recurrent() const {
+  for (int i = 0; i < N; ++i)
+    for (int j = lo[i]; j < hi[i]; ++j)
+      if ((*this)[i, j] < 0 || (*this)[i, j] > 3)
+        return false;
+
+  PaddedMatrix<uint8_t> v(N, N);
+  std::vector<std::pair<int, int>> stack;
+  for (int i = 0; i < N; ++i) {
+    for (int j = lo[i]; j < hi[i]; ++j) {
+      v[i, j] = 1;
+      stack.emplace_back(i, j);
+    }
+  }
+
+  int cells = stack.size();
+  while (!stack.empty()) {
+    auto [i, j] = stack.back();
+    stack.pop_back();
+    if (!v[i, j])
+      continue;
+    int nbrs = v[i - 1, j] + v[i + 1, j] + v[i, j - 1] + v[i, j + 1];
+    if ((*this)[i, j] < nbrs)
+      continue;
+
+    v[i, j] = 0;
+    --cells;
+    stack.insert(stack.end(), {{i - 1, j}, {i + 1, j}, {i, j - 1}, {i, j + 1}});
+  }
+
+  return cells == 0;
+}
+
+template <bool Odd, typename VerifyOutput>
+bool Grid<Odd, VerifyOutput>::is_zero() const {
+  auto g = [&](int i, int j) {
+    auto [r, c] = index(i, j);
+    return potential[r, c];
+  };
+
+  for (int i = 0; i < N; ++i)
+    for (int j = lo[i]; j < hi[i]; ++j)
+      if ((*this)[i, j] !=
+          4 * g(i, j) - g(i - 1, j) - g(i + 1, j) - g(i, j - 1) - g(i, j + 1))
+        return false;
+  return true;
+}
+
+template <bool Odd, typename VerifyOutput>
+bool Grid<Odd, VerifyOutput>::verify_solution() const
+  requires VerifyOutput::value
+{
+  return recurrent() && is_zero();
+}
+
+template <bool Odd, typename VerifyOutput>
+Grid<Odd, VerifyOutput> Grid<Odd, VerifyOutput>::find_identity(int N) {
   Grid grid(N);
 
   // T(6)
@@ -135,10 +239,14 @@ template <bool Odd> Grid<Odd> Grid<Odd>::find_identity(int N) {
       grid[i, j] = 6;
   grid.stabilize_tiled();
 
-  // T(6 - T(6))
-  for (int i = 0; i < grid.R; ++i)
-    for (int j = grid.lo[i]; j < grid.hi[i]; ++j)
+  // T(6 - T(6)), where 6 - T(6) = L x1 has potential x1
+  for (int i = 0; i < grid.R; ++i) {
+    for (int j = grid.lo[i]; j < grid.hi[i]; ++j) {
       grid[i, j] = 6 - grid[i, j];
+      if constexpr (VerifyOutput::value)
+        grid.potential[i, j] = -grid.potential[i, j];
+    }
+  }
   grid.stabilize_tiled();
 
   return grid;
@@ -147,7 +255,8 @@ template <bool Odd> Grid<Odd> Grid<Odd>::find_identity(int N) {
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-template <bool Odd> bool Grid<Odd>::render(const std::string &filename) const {
+template <bool Odd, typename VerifyOutput>
+bool Grid<Odd, VerifyOutput>::render(const std::string &filename) const {
   int chan = 3, stride = N * chan;
   std::vector<char> pixels(N * N * chan);
 
@@ -191,5 +300,7 @@ template <bool Odd> bool Grid<Odd>::render(const std::string &filename) const {
 }
 
 // explicit instantiation of Grid
-template class Grid<true>;
-template class Grid<false>;
+template class Grid<true, std::true_type>;
+template class Grid<true, std::false_type>;
+template class Grid<false, std::true_type>;
+template class Grid<false, std::false_type>;
