@@ -6,9 +6,6 @@
 
 #include "sandpile.h"
 
-// reflect x about n, assuming 0 <= x <= 2n
-int mirror(int x, int n) { return x <= n ? x : 2 * n - x; }
-
 template <bool Odd, typename VerifyOutput>
 Grid<Odd, VerifyOutput>::Grid(int N)
     : N(N), R(Odd ? (N + 1) / 2 : N), data(R, N), potential(R, N),
@@ -27,24 +24,35 @@ Grid<Odd, VerifyOutput>::Grid(int N)
   }
 }
 
-// if Odd, then Grid stores only the top half, as the grid is symmetric
 template <bool Odd, typename VerifyOutput>
-std::pair<int, int> Grid<Odd, VerifyOutput>::index(int row, int col) const {
-  return {Odd ? mirror(row, R - 1) : row, col};
-}
+Grid<Odd, VerifyOutput>::Grid(int N, const Grid<true, std::true_type> &source)
+  requires VerifyOutput::value
+    : Grid(N) {
+  interpolate(source);
 
-template <bool Odd, typename VerifyOutput>
-Grid<Odd, VerifyOutput>::count &Grid<Odd, VerifyOutput>::operator[](int row,
-                                                                    int col) {
-  auto [r, c] = index(row, col);
-  return data[r, c];
-}
+  // set grid-values to be a stable state starting from interpolated potential
+  // special-casing to ensure neer exceeds 8-bit number range
+  for (bool neg : {false, true}) {
+    bool changed;
+    do {
+      changed = false;
+      // cells of one parity only neighbour cells of the other
+      for (int p : {0, 1}) {
+#pragma omp parallel for reduction(| : changed) schedule(guided)
+        for (int i = 0; i < R; ++i) {
+          for (int j = lo[i] + ((i + lo[i] + p) & 1); j < hi[i]; j += 2) {
+            int32_t u = laplacian(i, j);
+            if (neg ? u < 0 : u > std::numeric_limits<count>::max()) {
+              potential[i, j] -= u >> 2;
+              changed = true;
+            }
+          }
+        }
+      }
+    } while (changed);
+  }
 
-template <bool Odd, typename VerifyOutput>
-const Grid<Odd, VerifyOutput>::count &
-Grid<Odd, VerifyOutput>::operator[](int row, int col) const {
-  auto [r, c] = index(row, col);
-  return data[r, c];
+  set_heights();
 }
 
 template <bool Odd, typename VerifyOutput>
@@ -66,8 +74,8 @@ bool Grid<Odd, VerifyOutput>::gather(int lo, int hi,
 }
 
 template <bool Odd, typename VerifyOutput>
-bool Grid<Odd, VerifyOutput>::gather(PaddedMatrix<count> &out, int row_lo,
-                                     int row_hi, int col_lo, int col_hi) {
+bool Grid<Odd, VerifyOutput>::gather(Matrix<count> &out, int row_lo, int row_hi,
+                                     int col_lo, int col_hi) {
   bool changed = false;
   for (int i = row_lo; i < row_hi; ++i)
     changed |= gather(std::max(lo[i], col_lo), std::min(hi[i], col_hi),
@@ -78,7 +86,7 @@ bool Grid<Odd, VerifyOutput>::gather(PaddedMatrix<count> &out, int row_lo,
 
 template <bool Odd, typename VerifyOutput>
 void Grid<Odd, VerifyOutput>::stabilize() {
-  PaddedMatrix<count> buf(R, N);
+  Matrix<count> buf(R, N);
   int sweeps = 0;
   bool c;
   do {
@@ -124,7 +132,7 @@ void Grid<Odd, VerifyOutput>::stabilize_tiled() {
   };
   PaddedMatrix<Flag> prev(rows, cols, Flag{1}), cur(rows, cols);
 
-  PaddedMatrix<count> buf(R, N);
+  Matrix<count> buf(R, N);
   int sweeps = 0;
   bool c;
   do {
@@ -172,6 +180,37 @@ void Grid<Odd, VerifyOutput>::stabilize_tiled() {
     flush();
 }
 
+template <bool Odd, typename VerifyOutput>
+void Grid<Odd, VerifyOutput>::interpolate(
+    const Grid<true, std::true_type> &source) {
+  const double ratio = static_cast<double>(source.N + 1) / (N + 1);
+  const double scale = 1 / (ratio * ratio);
+  const auto &g = source.potential;
+
+#pragma omp parallel for schedule(guided)
+  for (int i = 0; i < R; ++i) {
+    double x = (i + 1) * ratio - 1;
+    int x0 = std::floor(x);
+    double dx = x - x0;
+    for (int j = lo[i]; j < hi[i]; ++j) {
+      double y = (j + 1) * ratio - 1;
+      int y0 = std::floor(y);
+      double dy = y - y0;
+      double v = (1 - dx) * ((1 - dy) * g[x0, y0] + dy * g[x0, y0 + 1]) +
+                 dx * ((1 - dy) * g[x0 + 1, y0] + dy * g[x0 + 1, y0 + 1]);
+      potential[i, j] = std::lround(scale * v);
+    }
+  }
+}
+
+template <bool Odd, typename VerifyOutput>
+void Grid<Odd, VerifyOutput>::set_heights() {
+#pragma omp parallel for schedule(guided)
+  for (int i = 0; i < R; ++i)
+    for (int j = lo[i]; j < hi[i]; ++j)
+      (*this)[i, j] = laplacian(i, j);
+}
+
 // Dhar's burning test for recurrence
 template <bool Odd, typename VerifyOutput>
 bool Grid<Odd, VerifyOutput>::recurrent() const {
@@ -208,16 +247,17 @@ bool Grid<Odd, VerifyOutput>::recurrent() const {
 }
 
 template <bool Odd, typename VerifyOutput>
-bool Grid<Odd, VerifyOutput>::is_zero() const {
-  auto g = [&](int i, int j) {
-    auto [r, c] = index(i, j);
-    return potential[r, c];
-  };
+int32_t Grid<Odd, VerifyOutput>::laplacian(int row, int col) const {
+  const auto &g = potential;
+  return 4 * g[row, col] - g[row - 1, col] - g[row + 1, col] - g[row, col - 1] -
+         g[row, col + 1];
+}
 
+template <bool Odd, typename VerifyOutput>
+bool Grid<Odd, VerifyOutput>::is_zero() const {
   for (int i = 0; i < N; ++i)
     for (int j = lo[i]; j < hi[i]; ++j)
-      if ((*this)[i, j] !=
-          4 * g(i, j) - g(i - 1, j) - g(i + 1, j) - g(i, j - 1) - g(i, j + 1))
+      if ((*this)[i, j] != laplacian(i, j))
         return false;
   return true;
 }
@@ -230,7 +270,7 @@ bool Grid<Odd, VerifyOutput>::verify_solution() const
 }
 
 template <bool Odd, typename VerifyOutput>
-Grid<Odd, VerifyOutput> Grid<Odd, VerifyOutput>::find_identity(int N) {
+Grid<Odd, VerifyOutput> Grid<Odd, VerifyOutput>::identity_difference(int N) {
   Grid grid(N);
 
   // T(6)

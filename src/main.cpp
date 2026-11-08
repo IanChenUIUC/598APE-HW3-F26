@@ -5,7 +5,7 @@
 #include "sandpile.h"
 
 template <bool Odd, typename VerifyOutput> int solve(int N, bool dorender) {
-  auto grid = Grid<Odd, VerifyOutput>::find_identity(N);
+  auto grid = Grid<Odd, VerifyOutput>::identity_difference(N);
   if constexpr (VerifyOutput::value) {
     if (grid.verify_solution()) {
       printf("Verification of identity succeeded\n");
