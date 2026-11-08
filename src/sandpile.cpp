@@ -40,7 +40,7 @@ int Grid<Odd>::gather(int N, int row, const count *__restrict prev,
                       count *__restrict out) {
   int lo = get_lo(N, row);
   int hi = get_hi(N, row);
-  int changed = 0;
+  bool changed = 0;
   for (int j = lo; j < hi; ++j) {
     out[j] = cur[j] - 4 * (cur[j] >= 4) + (prev[j] >= 4) + (cur[j - 1] >= 4) +
              (next[j] >= 4) + (cur[j + 1] >= 4);
