@@ -83,7 +83,11 @@ void Grid<Odd>::stabilize_tiled() {
   const int cols = (N + TileW - 1) / TileW;
 
   // whether each tile changed in the previous / current sweep
-  PaddedMatrix<uint8_t> prev(rows, cols, 1), cur(rows, cols);
+  // aligned to remove false sharing
+  struct alignas(64) Flag {
+    uint8_t flag;
+  };
+  PaddedMatrix<Flag> prev(rows, cols, Flag{1}), cur(rows, cols);
 
   Grid<Odd> buf(N);
   bool c;
@@ -92,15 +96,17 @@ void Grid<Odd>::stabilize_tiled() {
 #pragma omp parallel for collapse(2) reduction(| : c) schedule(guided)
     for (int ti = 0; ti < rows; ++ti) {
       for (int tj = 0; tj < cols; ++tj) {
-        bool active = prev[ti, tj] || prev[ti - 1, tj] || prev[ti + 1, tj] ||
-                      prev[ti, tj - 1] || prev[ti, tj + 1];
+        bool active = prev[ti, tj].flag || prev[ti - 1, tj].flag ||
+                      prev[ti + 1, tj].flag || prev[ti, tj - 1].flag ||
+                      prev[ti, tj + 1].flag;
 
         if (active)
-          cur[ti, tj] = gather(buf, ti * TileH, std::min((ti + 1) * TileH, R),
-                               tj * TileW, std::min((tj + 1) * TileW, N));
+          cur[ti, tj].flag =
+              gather(buf, ti * TileH, std::min((ti + 1) * TileH, R), tj * TileW,
+                     std::min((tj + 1) * TileW, N));
         else
-          cur[ti, tj] = 0;
-        c |= cur[ti, tj];
+          cur[ti, tj].flag = 0;
+        c |= cur[ti, tj].flag;
       }
     }
     std::swap(buf.data, this->data);
