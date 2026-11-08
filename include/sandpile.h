@@ -25,11 +25,15 @@ private:
   const int N;
   const int R; // half if it is odd
 
+  // intervals of the cols that are non-empty
+  std::vector<int> lo;
+  std::vector<int> hi;
+
   // stabilize
   void stabilize();
 
   // topple each of the cells in row
-  static int gather(int N, int row, const count *__restrict prev,
+  static int gather(int N, int lo, int hi, const count *__restrict prev,
                     const count *__restrict cur, const count *__restrict next,
                     count *__restrict out);
 

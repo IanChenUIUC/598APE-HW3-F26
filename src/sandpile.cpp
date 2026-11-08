@@ -4,9 +4,29 @@
 #include "sandpile.h"
 
 template <>
-Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data((N + 2) * (R + 1)) {}
+Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data((N + 2) * (R + 1)) {
+  lo.reserve(R);
+  hi.reserve(R);
 
-template <> Grid<false>::Grid(int N) : N(N), R(N), data((N + 2) * (R + 2)) {}
+  int N2 = N / 2;
+  for (int i = 0; i < R; ++i) {
+    int rad = static_cast<int>(std::sqrt(N2 * N2 - (i - N2) * (i - N2)));
+    lo.push_back(N2 - rad);
+    hi.push_back(std::min(std::max(i, N - 1 - i), N2 + rad) + 1);
+  }
+}
+
+template <> Grid<false>::Grid(int N) : N(N), R(N), data((N + 2) * (R + 2)) {
+  lo.reserve(R);
+  hi.reserve(R);
+
+  int N2 = N / 2;
+  for (int i = 0; i < R; ++i) {
+    int rad = static_cast<int>(std::sqrt(N2 * N2 - (i - N2) * (i - N2)));
+    lo.push_back(N2 - rad);
+    hi.push_back(std::min(std::max(i, N - 1 - i), N2 + rad) + 1);
+  }
+}
 
 // if Odd, then Grid can store symmetric
 template <bool Odd> Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) {
@@ -22,24 +42,10 @@ const Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) const {
   return data[(row + 1) * (N + 2) + (col + 1)];
 }
 
-int get_lo(int N, int row) {
-  int N2 = N / 2;
-  return N2 - (int)(std::sqrt(N2 * N2 - (row - N2) * (row - N2)));
-}
-
-int get_hi(int N, int row) {
-  int N2 = N / 2;
-  int thresh1 = std::max(row, N - 1 - row);
-  int thresh2 = N2 + (int)(std::sqrt(N2 * N2 - (row - N2) * (row - N2)));
-  return std::min(thresh1, thresh2) + 1;
-}
-
 template <bool Odd>
-int Grid<Odd>::gather(int N, int row, const count *__restrict prev,
+int Grid<Odd>::gather(int N, int lo, int hi, const count *__restrict prev,
                       const count *__restrict cur, const count *__restrict next,
                       count *__restrict out) {
-  int lo = get_lo(N, row);
-  int hi = get_hi(N, row);
   bool changed = 0;
   for (int j = lo; j < hi; ++j) {
     out[j] = cur[j] - 4 * (cur[j] >= 4) + (prev[j] >= 4) + (cur[j - 1] >= 4) +
@@ -56,7 +62,8 @@ template <bool Odd> void Grid<Odd>::stabilize() {
     c = false;
 #pragma omp parallel for reduction(| : c) schedule(guided)
     for (int i = 0; i < R; ++i)
-      c |= gather(N, i, &(*this)[i - 1], &(*this)[i], &(*this)[i + 1], &buf[i]);
+      c |= gather(N, lo[i], hi[i], &(*this)[i - 1], &(*this)[i],
+                  &(*this)[i + 1], &buf[i]);
     std::swap(buf.data, this->data);
   } while (c);
 }
@@ -66,13 +73,13 @@ template <bool Odd> Grid<Odd> Grid<Odd>::find_identity(int N) {
 
   // T(6)
   for (int i = 0; i < grid.R; ++i)
-    for (int j = get_lo(N, i); j < get_hi(N, i); ++j)
+    for (int j = grid.lo[i]; j < grid.hi[i]; ++j)
       grid[i, j] = 6;
   grid.stabilize();
 
   // T(6 - T(6))
   for (int i = 0; i < grid.R; ++i)
-    for (int j = get_lo(N, i); j < get_hi(N, i); ++j)
+    for (int j = grid.lo[i]; j < grid.hi[i]; ++j)
       grid[i, j] = 6 - grid[i, j];
   grid.stabilize();
 
