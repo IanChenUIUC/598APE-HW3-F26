@@ -93,20 +93,32 @@ void Grid<Odd>::stabilize_tiled() {
   bool c;
   do {
     c = false;
-#pragma omp parallel for collapse(2) reduction(| : c) schedule(guided)
+#pragma omp parallel for reduction(| : c) schedule(guided)
     for (int ti = 0; ti < rows; ++ti) {
-      for (int tj = 0; tj < cols; ++tj) {
-        bool active = prev[ti, tj].flag || prev[ti - 1, tj].flag ||
-                      prev[ti + 1, tj].flag || prev[ti, tj - 1].flag ||
-                      prev[ti, tj + 1].flag;
+      auto active = [&](int tj) {
+        return prev[ti, tj].flag || prev[ti - 1, tj].flag ||
+               prev[ti + 1, tj].flag || prev[ti, tj - 1].flag ||
+               prev[ti, tj + 1].flag;
+      };
 
-        if (active)
-          cur[ti, tj].flag =
-              gather(buf, ti * TileH, std::min((ti + 1) * TileH, R), tj * TileW,
-                     std::min((tj + 1) * TileW, N));
-        else
+      // gather each run of consecutive active tiles in a single pass
+      int tj = 0;
+      while (tj < cols) {
+        if (!active(tj)) {
           cur[ti, tj].flag = 0;
-        c |= cur[ti, tj].flag;
+          ++tj;
+          continue;
+        }
+
+        int end = tj + 1;
+        while (end < cols && active(end))
+          ++end;
+
+        bool changed = gather(buf, ti * TileH, std::min((ti + 1) * TileH, R),
+                              tj * TileW, std::min(end * TileW, N));
+        for (; tj < end; ++tj)
+          cur[ti, tj].flag = changed;
+        c |= changed;
       }
     }
     std::swap(buf.data, this->data);
