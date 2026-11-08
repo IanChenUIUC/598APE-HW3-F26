@@ -3,8 +3,7 @@
 
 #include "sandpile.h"
 
-template <>
-Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data((N + 2) * (R + 1)) {
+template <> Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data(R, N) {
   lo.reserve(R);
   hi.reserve(R);
 
@@ -16,7 +15,7 @@ Grid<true>::Grid(int N) : N(N), R((N + 1) / 2), data((N + 2) * (R + 1)) {
   }
 }
 
-template <> Grid<false>::Grid(int N) : N(N), R(N), data((N + 2) * (R + 2)) {
+template <> Grid<false>::Grid(int N) : N(N), R(N), data(R, N) {
   lo.reserve(R);
   hi.reserve(R);
 
@@ -32,26 +31,36 @@ template <> Grid<false>::Grid(int N) : N(N), R(N), data((N + 2) * (R + 2)) {
 template <bool Odd> Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) {
   if (Odd && row >= R)
     row = N - 1 - row;
-  return data[(row + 1) * (N + 2) + (col + 1)];
+  return data[row, col];
 }
 
 template <bool Odd>
 const Grid<Odd>::count &Grid<Odd>::operator[](int row, int col) const {
   if (Odd && row >= R)
     row = N - 1 - row;
-  return data[(row + 1) * (N + 2) + (col + 1)];
+  return data[row, col];
 }
 
 template <bool Odd>
-int Grid<Odd>::gather(int N, int lo, int hi, const count *__restrict prev,
-                      const count *__restrict cur, const count *__restrict next,
-                      count *__restrict out) {
+bool Grid<Odd>::gather(int lo, int hi, const count *__restrict prev,
+                       const count *__restrict cur,
+                       const count *__restrict next, count *__restrict out) {
   bool changed = 0;
   for (int j = lo; j < hi; ++j) {
     out[j] = cur[j] - 4 * (cur[j] >= 4) + (prev[j] >= 4) + (cur[j - 1] >= 4) +
              (next[j] >= 4) + (cur[j + 1] >= 4);
     changed |= out[j] != cur[j];
   }
+  return changed;
+}
+
+template <bool Odd>
+bool Grid<Odd>::gather(Grid &out, int row_lo, int row_hi, int col_lo,
+                       int col_hi) const {
+  bool changed = false;
+  for (int i = row_lo; i < row_hi; ++i)
+    changed |= gather(std::max(lo[i], col_lo), std::min(hi[i], col_hi),
+                      &(*this)[i - 1], &(*this)[i], &(*this)[i + 1], &out[i]);
   return changed;
 }
 
@@ -62,9 +71,40 @@ template <bool Odd> void Grid<Odd>::stabilize() {
     c = false;
 #pragma omp parallel for reduction(| : c) schedule(guided)
     for (int i = 0; i < R; ++i)
-      c |= gather(N, lo[i], hi[i], &(*this)[i - 1], &(*this)[i],
-                  &(*this)[i + 1], &buf[i]);
+      c |= gather(buf, i, i + 1, 0, N);
     std::swap(buf.data, this->data);
+  } while (c);
+}
+
+template <bool Odd>
+template <int TileW, int TileH>
+void Grid<Odd>::stabilize_tiled() {
+  const int rows = (R + TileH - 1) / TileH;
+  const int cols = (N + TileW - 1) / TileW;
+
+  // whether each tile changed in the previous / current sweep
+  PaddedMatrix<uint8_t> prev(rows, cols, 1), cur(rows, cols);
+
+  Grid<Odd> buf(N);
+  bool c;
+  do {
+    c = false;
+#pragma omp parallel for collapse(2) reduction(| : c) schedule(guided)
+    for (int ti = 0; ti < rows; ++ti) {
+      for (int tj = 0; tj < cols; ++tj) {
+        bool active = prev[ti, tj] || prev[ti - 1, tj] || prev[ti + 1, tj] ||
+                      prev[ti, tj - 1] || prev[ti, tj + 1];
+
+        if (active)
+          cur[ti, tj] = gather(buf, ti * TileH, std::min((ti + 1) * TileH, R),
+                               tj * TileW, std::min((tj + 1) * TileW, N));
+        else
+          cur[ti, tj] = 0;
+        c |= cur[ti, tj];
+      }
+    }
+    std::swap(buf.data, this->data);
+    std::swap(prev, cur);
   } while (c);
 }
 
@@ -75,13 +115,13 @@ template <bool Odd> Grid<Odd> Grid<Odd>::find_identity(int N) {
   for (int i = 0; i < grid.R; ++i)
     for (int j = grid.lo[i]; j < grid.hi[i]; ++j)
       grid[i, j] = 6;
-  grid.stabilize();
+  grid.stabilize_tiled();
 
   // T(6 - T(6))
   for (int i = 0; i < grid.R; ++i)
     for (int j = grid.lo[i]; j < grid.hi[i]; ++j)
       grid[i, j] = 6 - grid[i, j];
-  grid.stabilize();
+  grid.stabilize_tiled();
 
   return grid;
 }
